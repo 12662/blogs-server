@@ -31,17 +31,17 @@ mysql:
     config: charset=utf8mb4&parseTime=True&loc=Local
     db_name: blog_db
     username: root
-    password: 123456
+    password: root
     max_idle_conns: 10
     max_open_conns: 100
     log_mode: info
 qiniu:
     zone: z1
     bucket: ztq123
-    img_path: image.9ztq.cn/
+    img_path: https://image.9ztq.cn/
     access_key: aSPD9s8ePRnCpreenKRrhwiowQ_2Rx4W3gei8mPH
     secret_key: sbEE_BjKtEhTKj0Dooc-DxjUChOB-qafbZiBfxYm
-    use_https: true
+    use_https: false
     use_cdn_domains: true
 qq:
     enable: false
@@ -64,7 +64,7 @@ upload:
     size: 20
     path: uploads
 website:
-    logo: "/uploads/image./20191230110103637.png"
+    logo: /image/webLogo.jpg
     full_logo: ""
     title: 趙的个人博客
     slogan: 趙的个人博客
