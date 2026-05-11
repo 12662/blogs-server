@@ -9,7 +9,7 @@ email:
     port: 465
     from: 1299109366@qq.com
     nickname: xiaohuo
-    secret: jsitedxghkwrhdih
+    secret: mqbzvohvfgdpiccb
     is_ssl: true
 es:
     url: http://127.0.0.1:9200
