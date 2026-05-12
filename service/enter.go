@@ -9,6 +9,7 @@ type ServiceGroup struct {
 	QQService
 	ImageService
 	ArticleService
+	AIService
 	CommentService
 	AdvertisementService
 	FriendLinkService

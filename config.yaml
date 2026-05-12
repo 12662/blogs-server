@@ -1,3 +1,12 @@
+ai:
+    enable: true
+    qwen_api_key: "sk-c0841cd2b5cf443491ec4d13ff5d1a7a"
+    qwen_base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    qwen_model: qwen-turbo-latest
+    temperature: 0.7
+    max_tokens: 150
+    top_k: 8
+    request_timeout: 60
 captcha:
     height: 80
     width: 240
