@@ -17,12 +17,16 @@ import (
 	"github.com/elastic/go-elasticsearch/v8/typedapi/types"
 	"github.com/elastic/go-elasticsearch/v8/typedapi/types/enums/scriptlanguage"
 	"github.com/elastic/go-elasticsearch/v8/typedapi/types/enums/sortorder"
+	"github.com/gofrs/uuid"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
 type ArticleService struct {
 }
 
+// ArticleInfoByID 读取文章详情。
+// 这里顺手异步增加浏览量，和 RAG 向量库没有关系。
 func (articleService *ArticleService) ArticleInfoByID(id string) (elasticsearch.Article, error) {
 	// 异步更新浏览量
 	go func() {
@@ -32,6 +36,8 @@ func (articleService *ArticleService) ArticleInfoByID(id string) (elasticsearch.
 	return articleService.Get(id)
 }
 
+// ArticleSearch 是博客原有的普通关键词搜索，仍然用于文章列表/搜索页。
+// AI 聊天第二版已经切到 rag_chunks 的混合检索，不再直接搜索完整文章。
 func (articleService *ArticleService) ArticleSearch(info request.ArticleSearch) (interface{}, int64, error) {
 	req := &search.Request{
 		Query: &types.Query{},
@@ -106,7 +112,7 @@ func (articleService *ArticleService) ArticleSearch(info request.ArticleSearch) 
 		PageInfo:       info.PageInfo,
 		Index:          elasticsearch.ArticleIndex(),
 		Request:        req,
-		SourceIncludes: []string{"created_at", "cover", "title", "abstract", "category", "tags", "views", "comments", "likes"},
+		SourceIncludes: []string{"created_at", "cover", "title", "abstract", "category", "tags", "views", "comments", "likes", "rag_sync_status", "rag_sync_error", "rag_chunk_count"},
 	}
 	return utils.EsPagination(context.TODO(), option)
 }
@@ -202,17 +208,24 @@ func (articleService *ArticleService) ArticleCreate(req request.ArticleCreate) e
 	}
 	now := time.Now().Format("2006-01-02 15:04:05")
 	articleToCreate := elasticsearch.Article{
-		CreatedAt: now,
-		UpdatedAt: now,
-		Cover:     req.Cover,
-		Title:     req.Title,
-		Keyword:   req.Title,
-		Category:  req.Category,
-		Tags:      req.Tags,
-		Abstract:  req.Abstract,
-		Content:   req.Content,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		Cover:          req.Cover,
+		Title:          req.Title,
+		Keyword:        req.Title,
+		Category:       req.Category,
+		Tags:           req.Tags,
+		Abstract:       req.Abstract,
+		Content:        req.Content,
+		RAGSyncStatus:  elasticsearch.RAGSyncStatusPending,
+		RAGChunkCount:  0,
+		RAGContentHash: "",
+		RAGSyncedAt:    "",
 	}
-	return global.DB.Transaction(func(tx *gorm.DB) error {
+	// 文章发布后要立即同步到向量索引，所以这里改为后端先生成 ES 文档 ID。
+	// 如果让 ES 自动生成 ID，当前 Create 方法拿不到 ID，后续就无法稳定关联 rag_chunks.article_id。
+	articleID := uuid.Must(uuid.NewV4()).String()
+	if err := global.DB.Transaction(func(tx *gorm.DB) error {
 		// 同时更新文章类别表中的数据
 		if err := articleService.UpdateCategoryCount(tx, "", articleToCreate.Category); err != nil {
 			return err
@@ -235,15 +248,23 @@ func (articleService *ArticleService) ArticleCreate(req request.ArticleCreate) e
 			return err
 		}
 
-		return articleService.Create(&articleToCreate)
-	})
+		return articleService.CreateWithID(articleID, &articleToCreate)
+	}); err != nil {
+		return err
+	}
+	// 事务成功后只投递异步任务，主接口立即返回成功。
+	// 即使 Redis/AI 服务短暂异常，也不阻塞博客文章发布。
+	articleService.ScheduleRAGSyncBestEffort(context.TODO(), articleID)
+	return nil
 }
 
+// ArticleDelete 删除文章后，按 article_id 清理对应的所有 chunks。
+// Delete By Query 放在文章删除事务之后执行，确保只在文章真正删除成功后才清理向量库。
 func (articleService *ArticleService) ArticleDelete(req request.ArticleDelete) error {
 	if len(req.IDs) == 0 {
 		return nil
 	}
-	return global.DB.Transaction(func(tx *gorm.DB) error {
+	if err := global.DB.Transaction(func(tx *gorm.DB) error {
 		for _, id := range req.IDs {
 			articleToDelete, err := articleService.Get(id)
 			if err != nil {
@@ -284,31 +305,52 @@ func (articleService *ArticleService) ArticleDelete(req request.ArticleDelete) e
 			}
 		}
 		return articleService.Delete(req.IDs)
-	})
+	}); err != nil {
+		return err
+	}
+	for _, id := range req.IDs {
+		// 一个 article_id 可能对应多个 chunk，所以不能按 chunk ID 删除，只能按 article_id 条件删除。
+		if err := ServiceGroupApp.RAGService.DeleteArticleChunks(context.TODO(), id); err != nil {
+			global.Log.Error("Failed to delete article rag chunks", zap.String("article_id", id), zap.Error(err))
+		}
+	}
+	return nil
 }
 
+// ArticleUpdate 更新文章后，重新读取 ES 中的最新文章，再重建该文章的 chunks。
+// 采用“删旧 + 重建”的方式，比计算增量 diff 更简单可靠。
 func (articleService *ArticleService) ArticleUpdate(req request.ArticleUpdate) error {
 	now := time.Now().Format("2006-01-02 15:04:05")
 	articleToUpdate := struct {
-		UpdatedAt string   `json:"updated_at"`
-		Cover     string   `json:"cover"`
-		Title     string   `json:"title"`
-		Keyword   string   `json:"keyword"`
-		Category  string   `json:"category"`
-		Tags      []string `json:"tags"`
-		Abstract  string   `json:"abstract"`
-		Content   string   `json:"content"`
+		UpdatedAt      string   `json:"updated_at"`
+		Cover          string   `json:"cover"`
+		Title          string   `json:"title"`
+		Keyword        string   `json:"keyword"`
+		Category       string   `json:"category"`
+		Tags           []string `json:"tags"`
+		Abstract       string   `json:"abstract"`
+		Content        string   `json:"content"`
+		RAGSyncStatus  string   `json:"rag_sync_status"`
+		RAGSyncError   string   `json:"rag_sync_error"`
+		RAGChunkCount  int      `json:"rag_chunk_count"`
+		RAGContentHash string   `json:"rag_content_hash"`
+		RAGSyncedAt    string   `json:"rag_synced_at"`
 	}{
-		UpdatedAt: now,
-		Cover:     req.Cover,
-		Title:     req.Title,
-		Keyword:   req.Title,
-		Category:  req.Category,
-		Tags:      req.Tags,
-		Abstract:  req.Abstract,
-		Content:   req.Content,
+		UpdatedAt:      now,
+		Cover:          req.Cover,
+		Title:          req.Title,
+		Keyword:        req.Title,
+		Category:       req.Category,
+		Tags:           req.Tags,
+		Abstract:       req.Abstract,
+		Content:        req.Content,
+		RAGSyncStatus:  elasticsearch.RAGSyncStatusPending,
+		RAGSyncError:   "",
+		RAGChunkCount:  0,
+		RAGContentHash: "",
+		RAGSyncedAt:    "",
 	}
-	return global.DB.Transaction(func(tx *gorm.DB) error {
+	if err := global.DB.Transaction(func(tx *gorm.DB) error {
 		oldArticle, err := articleService.Get(req.ID)
 		if err != nil {
 			return err
@@ -350,7 +392,11 @@ func (articleService *ArticleService) ArticleUpdate(req request.ArticleUpdate) e
 		}
 
 		return articleService.Update(req.ID, articleToUpdate)
-	})
+	}); err != nil {
+		return err
+	}
+	articleService.ScheduleRAGSyncBestEffort(context.TODO(), req.ID)
+	return nil
 }
 
 func (articleService *ArticleService) ArticleList(info request.ArticleList) (list interface{}, total int64, err error) {

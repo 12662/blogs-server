@@ -29,5 +29,26 @@ func RegisterScheduledTasks(c *cron.Cron) error {
 	}); err != nil {
 		return err
 	}
+	if global.Config.AI.RAGMaintenanceEnable {
+		spec := global.Config.AI.RAGMaintenanceSpec
+		if spec == "" {
+			spec = "@every 30m"
+		}
+		if _, err := c.AddFunc(spec, func() {
+			result, err := MaintainRAGSyncTask()
+			if err != nil {
+				global.Log.Error("Failed to maintain rag sync:", zap.Error(err))
+				return
+			}
+			global.Log.Info("RAG maintenance finished",
+				zap.Int("scanned", result.Scanned),
+				zap.Int("queued", result.Queued),
+				zap.Int("skipped", result.Skipped),
+				zap.Int("failed", result.Failed),
+			)
+		}); err != nil {
+			return err
+		}
+	}
 	return nil
 }

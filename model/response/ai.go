@@ -1,8 +1,8 @@
 package response
 
 type AIChat struct {
-	Answer     string      `json:"answer"`
-	References []AIArticle `json:"references"`
+	Answer  string      `json:"answer"`
+	Sources []AIArticle `json:"sources"`
 }
 
 type AIArticle struct {

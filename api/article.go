@@ -188,6 +188,41 @@ func (articleApi *ArticleApi) ArticleUpdate(c *gin.Context) {
 	response.OkWithMessage("Successfully updated article", c)
 }
 
+// ArticleSyncRetry 管理员手动重试某篇文章的 RAG 向量同步。
+// 这个接口只负责把任务重新放进 Redis 队列，不能在 HTTP 请求里直接调用千问 API，
+// 否则后台管理操作会被 AI 服务耗时或失败拖住。
+func (articleApi *ArticleApi) ArticleSyncRetry(c *gin.Context) {
+	var req request.ArticleInfoByID
+	if err := c.ShouldBindUri(&req); err != nil {
+		response.FailWithMessage(err.Error(), c)
+		return
+	}
+
+	if err := articleService.RetryRAGSync(c.Request.Context(), req.ID); err != nil {
+		global.Log.Error("Failed to enqueue rag sync retry:", zap.String("article_id", req.ID), zap.Error(err))
+		response.FailWithMessage("Failed to enqueue rag sync retry", c)
+		return
+	}
+	response.OkWithMessage("Successfully queued RAG sync", c)
+}
+
+// ArticleSyncClear 管理员手动清除某篇文章在 rag_chunks 中的向量切片。
+// 注意：这里不会删除原文章索引，只会删除 AI 检索使用的切片数据，并把状态标记为 untracked。
+func (articleApi *ArticleApi) ArticleSyncClear(c *gin.Context) {
+	var req request.ArticleInfoByID
+	if err := c.ShouldBindUri(&req); err != nil {
+		response.FailWithMessage(err.Error(), c)
+		return
+	}
+
+	if err := articleService.ClearRAGSync(c.Request.Context(), req.ID); err != nil {
+		global.Log.Error("Failed to clear rag sync data:", zap.String("article_id", req.ID), zap.Error(err))
+		response.FailWithMessage("Failed to clear rag sync data", c)
+		return
+	}
+	response.OkWithMessage("Successfully cleared RAG sync data", c)
+}
+
 // ArticleList 获取文章列表
 func (articleApi *ArticleApi) ArticleList(c *gin.Context) {
 	var pageInfo request.ArticleList

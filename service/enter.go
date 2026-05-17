@@ -10,6 +10,7 @@ type ServiceGroup struct {
 	ImageService
 	ArticleService
 	AIService
+	RAGService
 	CommentService
 	AdvertisementService
 	FriendLinkService

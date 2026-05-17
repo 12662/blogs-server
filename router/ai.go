@@ -14,5 +14,8 @@ func (a *AIRouter) InitAIRouter(PublicRouter *gin.RouterGroup) {
 	aiApi := api.ApiGroupApp.AIApi
 	{
 		aiRouter.POST("chat", aiApi.Chat)
+		aiRouter.POST("chat/stream", aiApi.ChatStream)
+		PublicRouter.POST("chat", aiApi.Chat)
+		PublicRouter.POST("chat/stream", aiApi.ChatStream)
 	}
 }

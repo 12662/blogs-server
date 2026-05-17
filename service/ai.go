@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -20,17 +21,22 @@ import (
 
 	"github.com/elastic/go-elasticsearch/v8/typedapi/core/search"
 	"github.com/elastic/go-elasticsearch/v8/typedapi/types"
+	"go.uber.org/zap"
 )
 
 type AIService struct {
 }
 
+// aiContextArticle 是第一版关键词检索遗留的文章级上下文结构。
+// 当前第二版主流程已经切到 RagChunk，保留这些函数是为了后续需要回退关键词检索时复用。
 type aiContextArticle struct {
 	ID      string
 	Source  elasticsearch.Article
 	Snippet string
 }
 
+// qwenChatRequest/qwenChatResponse 对应千问 compatible-mode 的 /chat/completions 接口。
+// 这里没有引入 SDK，是为了和当前项目风格保持一致，直接用标准库 http 调用。
 type qwenChatRequest struct {
 	Model       string            `json:"model"`
 	Messages    []qwenChatMessage `json:"messages"`
@@ -46,7 +52,8 @@ type qwenChatMessage struct {
 
 type qwenChatResponse struct {
 	Choices []struct {
-		Message qwenChatMessage `json:"message"`
+		Message      qwenChatMessage `json:"message"`
+		FinishReason string          `json:"finish_reason"`
 	} `json:"choices"`
 	Error *struct {
 		Message string `json:"message"`
@@ -55,6 +62,21 @@ type qwenChatResponse struct {
 	} `json:"error,omitempty"`
 }
 
+type qwenChatStreamResponse struct {
+	Choices []struct {
+		Delta        qwenChatMessage `json:"delta"`
+		Message      qwenChatMessage `json:"message"`
+		FinishReason string          `json:"finish_reason"`
+	} `json:"choices"`
+	Error *struct {
+		Message string `json:"message"`
+		Type    string `json:"type"`
+		Code    string `json:"code"`
+	} `json:"error,omitempty"`
+}
+
+// Chat 是 AI 聊天的总入口。
+// 第二版流程：用户问题 -> RAG 混合检索拿到 chunks -> 组装 Prompt -> 调千问生成最终回答。
 func (aiService *AIService) Chat(req request.AIChat) (response.AIChat, error) {
 	question := strings.TrimSpace(req.Message)
 	if question == "" {
@@ -63,27 +85,107 @@ func (aiService *AIService) Chat(req request.AIChat) (response.AIChat, error) {
 	if !global.Config.AI.Enable {
 		return response.AIChat{}, errors.New("AI chat is disabled")
 	}
-	articles, err := aiService.searchArticles(context.TODO(), question)
+	topK := global.Config.AI.TopK
+	if topK <= 0 {
+		topK = 8
+	}
+	hits, err := aiService.retrieveHits(context.TODO(), question, topK)
 	if err != nil {
 		return response.AIChat{}, err
 	}
-	references := aiService.buildReferences(articles)
-	if len(articles) == 0 {
-		return response.AIChat{
-			Answer:     aiService.notFoundAnswer(req.Language, question),
-			References: references,
-		}, nil
-	}
-	answer, err := aiService.callQwen(context.TODO(), req, articles)
+	sources := aiService.buildSources(hits)
+	answer, err := aiService.callQwen(context.TODO(), req, hits)
 	if err != nil {
 		return response.AIChat{}, err
 	}
 	return response.AIChat{
-		Answer:     strings.TrimSpace(answer),
-		References: references,
+		Answer:  strings.TrimSpace(answer),
+		Sources: sources,
 	}, nil
 }
 
+// ChatStream 和 Chat 使用同一套检索/Prompt，只是把大模型输出以增量形式回调给 API 层。
+func (aiService *AIService) ChatStream(ctx context.Context, req request.AIChat, onSources func([]response.AIArticle) error, onDelta func(string) error) error {
+	question := strings.TrimSpace(req.Message)
+	if question == "" {
+		return errors.New("message is required")
+	}
+	if !global.Config.AI.Enable {
+		return errors.New("AI chat is disabled")
+	}
+	topK := global.Config.AI.TopK
+	if topK <= 0 {
+		topK = 8
+	}
+	hits, err := aiService.retrieveHits(ctx, question, topK)
+	if err != nil {
+		return err
+	}
+	if onSources != nil {
+		if err := onSources(aiService.buildSources(hits)); err != nil {
+			return err
+		}
+	}
+	return aiService.callQwenStream(ctx, req, hits, onDelta)
+}
+
+func (aiService *AIService) retrieveHits(ctx context.Context, question string, topK int) ([]RAGSearchHit, error) {
+	// 向量库只存中文博客内容，所以检索 filter 固定为 zh。
+	// 用户如果用英文提问，Embedding 仍然可以检索中文知识，最终回答语言由 Prompt 控制。
+	hits, err := ServiceGroupApp.RAGService.HybridSearch(ctx, question, "zh", topK)
+	if err == nil && len(hits) > 0 {
+		return hits, nil
+	}
+	if err != nil {
+		global.Log.Warn("Hybrid RAG search failed, fallback to keyword chunks", zap.Error(err))
+	}
+
+	hits, keywordErr := ServiceGroupApp.RAGService.KeywordSearchChunks(ctx, question, "zh", topK)
+	if keywordErr == nil && len(hits) > 0 {
+		return hits, nil
+	}
+	if keywordErr != nil {
+		global.Log.Warn("RAG keyword chunk search failed, fallback to article search", zap.Error(keywordErr))
+	}
+
+	articleHits, articleErr := aiService.articleFallbackHits(ctx, question, topK)
+	if articleErr != nil {
+		if err != nil {
+			return nil, err
+		}
+		if keywordErr != nil {
+			return nil, keywordErr
+		}
+		return nil, articleErr
+	}
+	return articleHits, nil
+}
+
+func (aiService *AIService) articleFallbackHits(ctx context.Context, question string, topK int) ([]RAGSearchHit, error) {
+	articles, err := aiService.searchArticles(ctx, question)
+	if err != nil {
+		return nil, err
+	}
+	if topK <= 0 || topK > len(articles) {
+		topK = len(articles)
+	}
+	hits := make([]RAGSearchHit, 0, topK)
+	for i := 0; i < topK; i++ {
+		article := articles[i]
+		hits = append(hits, RAGSearchHit{
+			ID:        "article-" + article.ID,
+			ArticleID: article.ID,
+			Text:      article.Snippet,
+			Title:     article.Source.Title,
+			URL:       ServiceGroupApp.RAGService.ArticleURL(article.ID),
+			Language:  "zh",
+		})
+	}
+	return hits, nil
+}
+
+// searchArticles 是第一版文章级关键词检索逻辑。
+// 第二版不再走这里；保留它可以作为后续 Hybrid Search 失败时的兜底方案。
 func (aiService *AIService) searchArticles(ctx context.Context, query string) ([]aiContextArticle, error) {
 	topK := global.Config.AI.TopK
 	if topK <= 0 {
@@ -131,7 +233,9 @@ func (aiService *AIService) searchArticles(ctx context.Context, query string) ([
 	return articles, nil
 }
 
-func (aiService *AIService) callQwen(ctx context.Context, req request.AIChat, articles []aiContextArticle) (string, error) {
+// callQwen 把检索到的 chunks 和用户问题一起发送给千问大模型。
+// 这里调用的是 Chat 模型，不是 Embedding 模型；Embedding 模型只在 RAGService 中使用。
+func (aiService *AIService) callQwen(ctx context.Context, req request.AIChat, hits []RAGSearchHit) (string, error) {
 	apiKey := strings.TrimSpace(global.Config.AI.QwenAPIKey)
 	if apiKey == "" {
 		return "", errors.New("qwen api key is not configured")
@@ -153,10 +257,14 @@ func (aiService *AIService) callQwen(ctx context.Context, req request.AIChat, ar
 
 	payload := qwenChatRequest{
 		Model:       model,
-		Messages:    aiService.buildMessages(req, articles),
+		Messages:    aiService.buildMessages(req, hits),
 		Temperature: global.Config.AI.Temperature,
-		MaxTokens:   global.Config.AI.MaxTokens,
 		Stream:      false,
+	}
+	// max_tokens 太低时，模型会像“话没说完”一样被截断。这里给聊天回答一个可读性下限。
+	payload.MaxTokens = global.Config.AI.MaxTokens
+	if payload.MaxTokens <= 0 || payload.MaxTokens < 2200 {
+		payload.MaxTokens = 2200
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -191,21 +299,132 @@ func (aiService *AIService) callQwen(ctx context.Context, req request.AIChat, ar
 	if len(qwenResp.Choices) == 0 {
 		return "", errors.New("qwen response has no choices")
 	}
-	return qwenResp.Choices[0].Message.Content, nil
+	return aiService.normalizeChatAnswer(qwenResp.Choices[0].Message.Content), nil
 }
 
-func (aiService *AIService) buildMessages(req request.AIChat, articles []aiContextArticle) []qwenChatMessage {
-	languageRule := "请使用与用户最后一个问题相同的语言回答；如果用户使用英文提问，请使用英文回答。"
-	if strings.EqualFold(req.Language, "en") {
-		languageRule = "Answer in English because the user is asking in English."
+func (aiService *AIService) callQwenStream(ctx context.Context, req request.AIChat, hits []RAGSearchHit, onDelta func(string) error) error {
+	apiKey := strings.TrimSpace(global.Config.AI.QwenAPIKey)
+	if apiKey == "" {
+		return errors.New("qwen api key is not configured")
 	}
-	systemPrompt := "你是赵天奇的博客的 AI 助手。只能根据提供的博客文章内容回答问题，不要编造博客中不存在的信息。回答要简洁、准确，并在合适时提到参考文章标题。" + languageRule
+	baseURL := strings.TrimRight(global.Config.AI.QwenBaseURL, "/")
+	if baseURL == "" {
+		baseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+	}
+	model := global.Config.AI.QwenModel
+	if model == "" {
+		model = "qwen-turbo-latest"
+	}
+	timeout := global.Config.AI.RequestTimeout
+	if timeout <= 0 {
+		timeout = 60
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+	defer cancel()
+
+	payload := qwenChatRequest{
+		Model:       model,
+		Messages:    aiService.buildMessages(req, hits),
+		Temperature: global.Config.AI.Temperature,
+		Stream:      true,
+		MaxTokens:   global.Config.AI.MaxTokens,
+	}
+	if payload.MaxTokens <= 0 || payload.MaxTokens < 2200 {
+		payload.MaxTokens = 2200
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		var qwenResp qwenChatResponse
+		if err := json.Unmarshal(respBody, &qwenResp); err == nil && qwenResp.Error != nil && qwenResp.Error.Message != "" {
+			return errors.New(qwenResp.Error.Message)
+		}
+		return fmt.Errorf("qwen stream request failed: %s", resp.Status)
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "[DONE]" {
+			return nil
+		}
+		var streamResp qwenChatStreamResponse
+		if err := json.Unmarshal([]byte(data), &streamResp); err != nil {
+			continue
+		}
+		if streamResp.Error != nil && streamResp.Error.Message != "" {
+			return errors.New(streamResp.Error.Message)
+		}
+		for _, choice := range streamResp.Choices {
+			delta := choice.Delta.Content
+			if delta == "" {
+				delta = choice.Message.Content
+			}
+			if delta != "" && onDelta != nil {
+				if err := onDelta(delta); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return scanner.Err()
+}
+
+// buildMessages 负责生成 OpenAI-compatible 的 messages 数组。
+// 优化理念：System message 专门负责设定角色、工作流和严格格式，不包含具体数据。
+func (aiService *AIService) buildMessages(req request.AIChat, hits []RAGSearchHit) []qwenChatMessage {
+	languageRule := "请使用与用户最后一个问题相同的语言回答；如果用户使用英文提问，请使用英文回答。"
+	if strings.EqualFold(req.Language, "en") || looksEnglish(req.Message) {
+		languageRule = "Answer in English because the user is asking in English. The retrieved blog snippets may be Chinese; translate and explain them naturally in English."
+	}
+
+	systemPrompt := strings.Join([]string{
+		"【角色与目标】",
+		"你是赵天奇个人博客的专属 AI 助手。你的目标是自然、热情且专业地解答用户的疑问。",
+		"",
+		"【核心工作流（必须严格遵循）】",
+		"1. 优先基于检索到的博客片段作答。提取相关信息，自然地融入对话，切勿将不相关的片段生硬拼接成答案。",
+		"2. 若博客片段与问题无关，或信息不足以回答问题，你必须先明确声明：“在赵天奇的博客中暂时没有找到相关内容。”",
+		"3. 声明之后，必须无缝切换到通用知识模式。只要用户询问的是常识、技术名词、概念或历史文化等问题，都要继续给出详尽、完整的解释，并说明这部分是为你补充的拓展知识。",
+		"",
+		"【回答原则】",
+		"1. 拒绝半途而废：禁止只回答“没有找到相关信息”就结束对话，必须提供有价值的补充。",
+		"2. 深度与连贯：回答要像高质量的专栏探讨一样清楚、完整。遇到复杂问题需深入剖析，遇到简单问题则精准解答，切忌说到一半戛然而止。",
+		"",
+		"【格式限制】",
+		"1. 禁用特定 Markdown：绝对不要使用 Markdown 的粗体（**）、标题符号（#）或裸链接（URL）。如果涉及代码，可以正常使用代码块。",
+		"2. 链接处理：前端会自动展示参考文章的卡片或链接，因此你的正文回答中严禁再次粘贴任何文章链接。",
+		languageRule,
+	}, "\n")
+
 	messages := []qwenChatMessage{{Role: "system", Content: systemPrompt}}
 
 	history := req.History
+	// 只保留最近 6 条历史，避免历史对话过长挤占博客上下文 token，导致模型遗忘指令。
 	if len(history) > 6 {
 		history = history[len(history)-6:]
 	}
+
 	for _, item := range history {
 		role := "user"
 		if item.Role == "assistant" || item.Role == "bot" {
@@ -218,34 +437,103 @@ func (aiService *AIService) buildMessages(req request.AIChat, articles []aiConte
 		messages = append(messages, qwenChatMessage{Role: role, Content: truncateRunes(content, 1000)})
 	}
 
-	userPrompt := aiService.buildUserPrompt(strings.TrimSpace(req.Message), articles)
+	userPrompt := aiService.buildUserPrompt(strings.TrimSpace(req.Message), hits)
 	messages = append(messages, qwenChatMessage{Role: "user", Content: userPrompt})
+
 	return messages
 }
 
-func (aiService *AIService) buildUserPrompt(question string, articles []aiContextArticle) string {
+// buildUserPrompt 把 TopK chunks 拼成最终上下文。
+// 优化理念：仅负责提供结构化的检索数据和用户问题，不包含任何逻辑指令，防止指令冗余和提示词注入。
+func (aiService *AIService) buildUserPrompt(question string, hits []RAGSearchHit) string {
 	var builder strings.Builder
-	builder.WriteString("请根据下面的博客文章内容回答用户问题。\n")
-	builder.WriteString("如果文章内容不足以回答，请明确说明没有在博客中找到足够依据。\n\n")
-	builder.WriteString("博客文章内容：\n")
-	for i, article := range articles {
-		builder.WriteString(fmt.Sprintf("\n[%d] 标题：%s\n", i+1, article.Source.Title))
-		if article.Source.Abstract != "" {
-			builder.WriteString("摘要：" + article.Source.Abstract + "\n")
+
+	// 使用明确的 XML 标签包裹检索内容，让大模型清晰区分“参考资料”与“系统指令”
+	builder.WriteString("<retrieved_blog_snippets>\n")
+
+	if len(hits) == 0 {
+		builder.WriteString("本次检索没有召回到相关的博客片段。\n")
+	} else {
+		for i, hit := range hits {
+			builder.WriteString(fmt.Sprintf("--- 来源文章 [%d]: %s ---\n", i+1, hit.Title))
+			builder.WriteString("片段内容：\n")
+			builder.WriteString(hit.Text + "\n\n")
 		}
-		if article.Source.Category != "" {
-			builder.WriteString("分类：" + article.Source.Category + "\n")
-		}
-		if len(article.Source.Tags) > 0 {
-			builder.WriteString("标签：" + strings.Join(article.Source.Tags, "、") + "\n")
-		}
-		builder.WriteString("内容片段：" + article.Snippet + "\n")
 	}
-	builder.WriteString("\n用户问题：\n")
+	builder.WriteString("</retrieved_blog_snippets>\n\n")
+
+	// 简短的引导语，直接带出问题
+	builder.WriteString("请结合上面的系统设定和检索片段，回答以下问题：\n")
 	builder.WriteString(question)
+
 	return builder.String()
 }
 
+// normalizeChatAnswer 对模型输出做最后一道轻量清洗。
+// 目标不是重写答案，而是把裸露的 Markdown 标记和重复 URL 去掉，让聊天框读起来像正常回答。
+func (aiService *AIService) normalizeChatAnswer(answer string) string {
+	answer = strings.TrimSpace(answer)
+	if answer == "" {
+		return answer
+	}
+
+	markdownLinkRe := regexp.MustCompile(`\[[^\]]+\]\((https?://[^)\s]+)\)`)
+	answer = markdownLinkRe.ReplaceAllStringFunc(answer, func(match string) string {
+		end := strings.Index(match, "]")
+		if end > 1 {
+			return match[1:end]
+		}
+		return ""
+	})
+	rawURLRe := regexp.MustCompile(`https?://[^\s)）]+`)
+	answer = rawURLRe.ReplaceAllString(answer, "")
+	for _, token := range []string{"**", "__", "###", "##", "#", "`"} {
+		answer = strings.ReplaceAll(answer, token, "")
+	}
+
+	lines := strings.Split(answer, "\n")
+	cleaned := make([]string, 0, len(lines))
+	previousBlank := false
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			if !previousBlank && len(cleaned) > 0 {
+				cleaned = append(cleaned, "")
+			}
+			previousBlank = true
+			continue
+		}
+		cleaned = append(cleaned, line)
+		previousBlank = false
+	}
+	return strings.TrimSpace(strings.Join(cleaned, "\n"))
+}
+
+// buildSources 从命中的 chunks 中提取去重后的文章来源。
+// 多个 chunk 可能来自同一篇文章，前端只需要展示一次来源链接。
+func (aiService *AIService) buildSources(hits []RAGSearchHit) []response.AIArticle {
+	sources := make([]response.AIArticle, 0, len(hits))
+	seen := make(map[string]struct{})
+	for _, hit := range hits {
+		key := hit.URL
+		if key == "" {
+			key = hit.ArticleID
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		sources = append(sources, response.AIArticle{
+			ID:    hit.ArticleID,
+			Title: hit.Title,
+			URL:   hit.URL,
+		})
+	}
+	return sources
+}
+
+// buildReferences 是第一版接口的来源构建逻辑。
+// 第二版返回 sources，保留此函数是为了后续做关键词回退时快速接上。
 func (aiService *AIService) buildReferences(articles []aiContextArticle) []response.AIArticle {
 	references := make([]response.AIArticle, 0, len(articles))
 	for _, article := range articles {
@@ -261,6 +549,7 @@ func (aiService *AIService) buildReferences(articles []aiContextArticle) []respo
 	return references
 }
 
+// articleSnippet 是第一版文章级检索时的正文摘要截取逻辑。
 func (aiService *AIService) articleSnippet(article elasticsearch.Article, query string) string {
 	content := strings.TrimSpace(stripMarkdown(article.Content))
 	if content == "" {
@@ -288,13 +577,17 @@ func (aiService *AIService) articleSnippet(article elasticsearch.Article, query 
 	return truncateRunes(content, 1200)
 }
 
+// notFoundAnswer 在 RAG 没召回任何 chunk 时返回兜底回答。
+// 注意这里不调用大模型，避免在没有博客依据时产生编造内容。
 func (aiService *AIService) notFoundAnswer(language string, question string) string {
 	if strings.EqualFold(language, "en") || looksEnglish(question) {
-		return "I could not find enough relevant content in the blog articles to answer this question."
+		return "I could not find relevant information about this topic in the blog articles. Based on general knowledge, I can still give you a brief explanation: please try asking again with a more specific subject, and I will explain the topic while clearly separating general knowledge from blog-based references."
 	}
-	return "我没有在博客文章中找到足够相关的内容，暂时无法基于博客给出可靠回答。"
+	return "我没有在博客文章中找到足够相关的内容。就通用知识来说，你问到的这个问题仍然可以继续解释：我会先说明博客里没有对应资料，再根据公开常识补充背景、定义、关键特点和常见理解。你可以把问题问得更具体一些，例如询问某个人物是谁、某个技术概念怎么理解、某段历史有什么背景，我会把“博客依据”和“通用知识”分开说明，避免把博客里不存在的信息误说成博客内容。"
 }
 
+// stripMarkdown 是第一版用的轻量 Markdown 清洗函数。
+// 第二版更完整的清洗逻辑在 rag.go 的 cleanArticleText 中。
 func stripMarkdown(s string) string {
 	replacements := []string{"```", "#", ">", "*", "`", "|"}
 	for _, old := range replacements {
@@ -306,6 +599,7 @@ func stripMarkdown(s string) string {
 	return strings.TrimSpace(re.ReplaceAllString(s, " "))
 }
 
+// truncateRunes 按 Unicode 字符截断，中文不会被截成半个字节。
 func truncateRunes(s string, limit int) string {
 	runes := []rune(s)
 	if limit <= 0 || len(runes) <= limit {
@@ -314,6 +608,8 @@ func truncateRunes(s string, limit int) string {
 	return string(runes[:limit]) + "..."
 }
 
+// looksEnglish 用一个简单规则判断用户是否主要使用英文。
+// 它只用于兜底回答语言判断，不参与检索语言过滤。
 func looksEnglish(s string) bool {
 	var latin, cjk int
 	for _, r := range s {

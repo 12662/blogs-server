@@ -3,10 +3,19 @@ ai:
     qwen_api_key: "sk-c0841cd2b5cf443491ec4d13ff5d1a7a"
     qwen_base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
     qwen_model: qwen-turbo-latest
-    temperature: 0.7
-    max_tokens: 150
+    qwen_embedding_model: text-embedding-v4
+    embedding_dimensions: 1024
+    rag_index: rag_chunks
+    article_base_url: http://localhost/article
+    temperature: 0.3
+    max_tokens: 900
     top_k: 8
     request_timeout: 60
+    embedding_batch_size: 10
+    embedding_concurrency: 2
+    rag_maintenance_enable: true
+    rag_maintenance_spec: "@every 30m"
+    rag_maintenance_batch_size: 50
 captcha:
     height: 80
     width: 240
