@@ -14,11 +14,22 @@ func main() {
 	global.DB = initialize.InitGorm()
 	global.Redis = initialize.ConnectRedis()
 	global.ESClient = initialize.ConnectEs()
+	global.AsynqClient = initialize.ConnectAsynqClient()
 
 	defer global.Redis.Close()
+	defer global.AsynqClient.Close()
 	flag.InitFlag()
 
-	initialize.InitCron()
+	global.AsynqServer = initialize.RunAsynqServer()
+	defer global.AsynqServer.Shutdown()
+
+	cronRunner := initialize.InitCron()
+	defer func() {
+		if cronRunner != nil {
+			cronCtx := cronRunner.Stop()
+			<-cronCtx.Done()
+		}
+	}()
 
 	core.RunServer()
 }

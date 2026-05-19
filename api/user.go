@@ -339,7 +339,11 @@ func (userApi *UserApi) UserChangeInfo(c *gin.Context) {
 // UserWeather 获取天气
 func (userApi *UserApi) UserWeather(c *gin.Context) {
 	ip := c.ClientIP()
-	weather, err := userService.UserWeather(ip)
+	city := c.Query("city")
+	if city == "" {
+		city = c.Query("adcode")
+	}
+	weather, err := userService.UserWeather(ip, city)
 	if err != nil {
 		global.Log.Error("Failed to get user weather", zap.Error(err))
 		response.FailWithMessage("Failed to get user weather", c)

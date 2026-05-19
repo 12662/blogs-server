@@ -36,6 +36,14 @@ var (
 		Name:  "es-import",
 		Usage: "Imports data into Elasticsearch from a specified file.",
 	}
+	ragIndexFlag = &cli.BoolFlag{
+		Name:  "rag-index",
+		Usage: "Initializes the RAG chunk Elasticsearch index.",
+	}
+	ragIngestFlag = &cli.BoolFlag{
+		Name:  "rag-ingest",
+		Usage: "Ingests all existing articles into the RAG chunk index.",
+	}
 	adminFlag = &cli.BoolFlag{
 		Name:  "admin",
 		Usage: "Creates an administrator using the name, email and address specified in the config.yaml file.",
@@ -96,6 +104,18 @@ func Run(c *cli.Context) {
 		} else {
 			global.Log.Info(fmt.Sprintf("Successfully imported ES data, totaling %d records", num))
 		}
+	case c.Bool(ragIndexFlag.Name):
+		if err := RAGIndex(); err != nil {
+			global.Log.Error("Failed to create RAG chunk index:", zap.Error(err))
+		} else {
+			global.Log.Info("Successfully created RAG chunk index")
+		}
+	case c.Bool(ragIngestFlag.Name):
+		if err := RAGIngest(); err != nil {
+			global.Log.Error("Failed to ingest RAG chunks:", zap.Error(err))
+		} else {
+			global.Log.Info("Successfully ingested RAG chunks")
+		}
 	case c.Bool(adminFlag.Name):
 		if err := Admin(); err != nil {
 			global.Log.Error("Failed to create an administrator:", zap.Error(err))
@@ -119,6 +139,8 @@ func NewApp() *cli.App {
 		esFlag,
 		esExportFlag,
 		esImportFlag,
+		ragIndexFlag,
+		ragIngestFlag,
 		adminFlag,
 	}
 	app.Action = Run

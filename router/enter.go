@@ -5,6 +5,7 @@ type RouterGroup struct {
 	UserRouter
 	ImageRouter
 	ArticleRouter
+	AIRouter
 	CommentRouter
 	AdvertisementRouter
 	FriendLinkRouter
