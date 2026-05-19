@@ -142,8 +142,23 @@ func (aiService *AIService) SetCurrentModel(model string) error {
 	if model == "" {
 		return errors.New("model is required")
 	}
-	if !hasAIModelName(global.Config.AI.EffectiveChatModels(), model) {
-		return errors.New("model not found")
+	if !hasAIModelName(global.Config.AI.ChatModels, model) {
+		return errors.New("该模型不可用")
+	}
+	global.Config.AI.QwenModel = model
+	return utils.SaveYAML()
+}
+
+func (aiService *AIService) SetVisibleCurrentModel(model string) error {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return errors.New("model is required")
+	}
+	if !hasAIModelName(global.Config.AI.ChatModels, model) {
+		return errors.New("该模型不可用")
+	}
+	if !hasAIModelName(global.Config.AI.VisibleChatModels(), model) {
+		return errors.New("该模型不可用")
 	}
 	global.Config.AI.QwenModel = model
 	return utils.SaveYAML()
@@ -215,19 +230,27 @@ func (aiService *AIService) Chat(req request.AIChat) (response.AIChat, error) {
 	if err != nil {
 		return response.AIChat{}, err
 	}
-	sources := aiService.buildSources(hits)
-	answer, err := aiService.callQwen(context.TODO(), req, hits)
+	model, err := aiService.resolveChatModel(req.Model)
 	if err != nil {
 		return response.AIChat{}, err
+	}
+	answer, err := aiService.callQwen(context.TODO(), req, hits, model)
+	if err != nil {
+		return response.AIChat{}, err
+	}
+	sources := aiService.buildSources(hits)
+	if aiService.answerHasNoBlogContent(answer) {
+		sources = nil
 	}
 	return response.AIChat{
 		Answer:  strings.TrimSpace(answer),
 		Sources: sources,
+		Model:   model,
 	}, nil
 }
 
 // ChatStream 和 Chat 使用同一套检索/Prompt，只是把大模型输出以增量形式回调给 API 层。
-func (aiService *AIService) ChatStream(ctx context.Context, req request.AIChat, onSources func([]response.AIArticle) error, onDelta func(string) error) error {
+func (aiService *AIService) ChatStream(ctx context.Context, req request.AIChat, onModel func(string) error, onSources func([]response.AIArticle) error, onDelta func(string) error) error {
 	question := strings.TrimSpace(req.Message)
 	if question == "" {
 		return errors.New("message is required")
@@ -243,12 +266,21 @@ func (aiService *AIService) ChatStream(ctx context.Context, req request.AIChat, 
 	if err != nil {
 		return err
 	}
+	model, err := aiService.resolveChatModel(req.Model)
+	if err != nil {
+		return err
+	}
+	if onModel != nil {
+		if err := onModel(model); err != nil {
+			return err
+		}
+	}
 	if onSources != nil {
 		if err := onSources(aiService.buildSources(hits)); err != nil {
 			return err
 		}
 	}
-	return aiService.callQwenStream(ctx, req, hits, onDelta)
+	return aiService.callQwenStream(ctx, req, hits, model, onDelta)
 }
 
 func (aiService *AIService) buildModelResponses(models []config.AIModel) []response.AIChatModel {
@@ -403,7 +435,7 @@ func (aiService *AIService) searchArticles(ctx context.Context, query string) ([
 
 // callQwen 把检索到的 chunks 和用户问题一起发送给千问大模型。
 // 这里调用的是 Chat 模型，不是 Embedding 模型；Embedding 模型只在 RAGService 中使用。
-func (aiService *AIService) callQwen(ctx context.Context, req request.AIChat, hits []RAGSearchHit) (string, error) {
+func (aiService *AIService) callQwen(ctx context.Context, req request.AIChat, hits []RAGSearchHit, model string) (string, error) {
 	apiKey := strings.TrimSpace(global.Config.AI.QwenAPIKey)
 	if apiKey == "" {
 		return "", errors.New("qwen api key is not configured")
@@ -411,10 +443,6 @@ func (aiService *AIService) callQwen(ctx context.Context, req request.AIChat, hi
 	baseURL := strings.TrimRight(global.Config.AI.QwenBaseURL, "/")
 	if baseURL == "" {
 		baseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-	}
-	model, err := aiService.resolveChatModel(req.Model)
-	if err != nil {
-		return "", err
 	}
 	timeout := global.Config.AI.RequestTimeout
 	if timeout <= 0 {
@@ -470,7 +498,7 @@ func (aiService *AIService) callQwen(ctx context.Context, req request.AIChat, hi
 	return aiService.normalizeChatAnswer(qwenResp.Choices[0].Message.Content), nil
 }
 
-func (aiService *AIService) callQwenStream(ctx context.Context, req request.AIChat, hits []RAGSearchHit, onDelta func(string) error) error {
+func (aiService *AIService) callQwenStream(ctx context.Context, req request.AIChat, hits []RAGSearchHit, model string, onDelta func(string) error) error {
 	apiKey := strings.TrimSpace(global.Config.AI.QwenAPIKey)
 	if apiKey == "" {
 		return errors.New("qwen api key is not configured")
@@ -478,10 +506,6 @@ func (aiService *AIService) callQwenStream(ctx context.Context, req request.AICh
 	baseURL := strings.TrimRight(global.Config.AI.QwenBaseURL, "/")
 	if baseURL == "" {
 		baseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-	}
-	model, err := aiService.resolveChatModel(req.Model)
-	if err != nil {
-		return err
 	}
 	timeout := global.Config.AI.RequestTimeout
 	if timeout <= 0 {
@@ -560,13 +584,19 @@ func (aiService *AIService) callQwenStream(ctx context.Context, req request.AICh
 
 func (aiService *AIService) resolveChatModel(requestedModel string) (string, error) {
 	model := strings.TrimSpace(requestedModel)
+	visibleModels := global.Config.AI.VisibleChatModels()
 	if model == "" {
-		return global.Config.AI.CurrentChatModel(), nil
-	}
-	for _, item := range global.Config.AI.VisibleChatModels() {
-		if item.Name == model {
-			return model, nil
+		currentModel := global.Config.AI.CurrentChatModel()
+		if hasAIModelName(visibleModels, currentModel) {
+			return currentModel, nil
 		}
+		if len(visibleModels) > 0 {
+			return visibleModels[0].Name, nil
+		}
+		return "", errors.New("no available chat model")
+	}
+	if hasAIModelName(visibleModels, model) {
+		return model, nil
 	}
 	return "", errors.New("selected chat model is not available")
 }
@@ -689,6 +719,27 @@ func (aiService *AIService) normalizeChatAnswer(answer string) string {
 		previousBlank = false
 	}
 	return strings.TrimSpace(strings.Join(cleaned, "\n"))
+}
+
+func (aiService *AIService) answerHasNoBlogContent(answer string) bool {
+	answer = strings.TrimSpace(answer)
+	if answer == "" {
+		return false
+	}
+	phrases := []string{
+		"在天奇的博客中暂时没有找到相关内容",
+		"博客中暂时没有找到相关内容",
+		"没有在博客文章中找到足够相关的内容",
+		"could not find relevant information",
+		"couldn't find relevant information",
+	}
+	lowerAnswer := strings.ToLower(answer)
+	for _, phrase := range phrases {
+		if strings.Contains(lowerAnswer, strings.ToLower(phrase)) {
+			return true
+		}
+	}
+	return false
 }
 
 // buildSources 从命中的 chunks 中提取去重后的文章来源。

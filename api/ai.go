@@ -49,6 +49,9 @@ func (aiApi *AIApi) ChatStream(c *gin.Context) {
 	err := aiService.ChatStream(
 		c.Request.Context(),
 		req,
+		func(model string) error {
+			return writeEvent("model", gin.H{"model": model})
+		},
 		func(sources []response.AIArticle) error {
 			return writeEvent("sources", sources)
 		},
@@ -153,6 +156,19 @@ func (aiApi *AIApi) CurrentModelUpdate(c *gin.Context) {
 		return
 	}
 	if err := aiService.SetCurrentModel(req.Model); err != nil {
+		response.FailWithMessage(err.Error(), c)
+		return
+	}
+	response.OkWithMessage("Successfully updated current model", c)
+}
+
+func (aiApi *AIApi) PublicCurrentModelUpdate(c *gin.Context) {
+	var req request.AICurrentModel
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.FailWithMessage(err.Error(), c)
+		return
+	}
+	if err := aiService.SetVisibleCurrentModel(req.Model); err != nil {
 		response.FailWithMessage(err.Error(), c)
 		return
 	}

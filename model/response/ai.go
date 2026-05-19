@@ -3,6 +3,7 @@ package response
 type AIChat struct {
 	Answer  string      `json:"answer"`
 	Sources []AIArticle `json:"sources"`
+	Model   string      `json:"model"`
 }
 
 type AIChatModels struct {
@@ -19,8 +20,8 @@ type AIModelList struct {
 }
 
 type AIBulkCreate struct {
-	Created int      `json:"created"`
-	Skipped []string `json:"skipped"`
+	Created int           `json:"created"`
+	Skipped []string      `json:"skipped"`
 	Models  []AIChatModel `json:"models"`
 }
 

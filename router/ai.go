@@ -17,6 +17,7 @@ func (a *AIRouter) InitAIRouter(PublicRouter *gin.RouterGroup, AdminRouter *gin.
 		aiRouter.POST("chat", aiApi.Chat)
 		aiRouter.POST("chat/stream", aiApi.ChatStream)
 		aiRouter.GET("quick-replies", aiApi.QuickReplies)
+		aiRouter.PUT("current-model", aiApi.PublicCurrentModelUpdate)
 		PublicRouter.POST("chat", aiApi.Chat)
 		PublicRouter.POST("chat/stream", aiApi.ChatStream)
 		PublicRouter.GET("chat/quick-replies", aiApi.QuickReplies)
@@ -28,6 +29,6 @@ func (a *AIRouter) InitAIRouter(PublicRouter *gin.RouterGroup, AdminRouter *gin.
 		adminAIRouter.POST("models/bulk", aiApi.ModelBulkCreate)
 		adminAIRouter.PUT("models", aiApi.ModelUpdate)
 		adminAIRouter.DELETE("models", aiApi.ModelDelete)
-		adminAIRouter.PUT("current-model", aiApi.CurrentModelUpdate)
+		adminAIRouter.PUT("models/current", aiApi.CurrentModelUpdate)
 	}
 }

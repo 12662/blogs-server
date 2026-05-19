@@ -2,7 +2,7 @@ ai:
     enable: true
     qwen_api_key: sk-c0841cd2b5cf443491ec4d13ff5d1a7a
     qwen_base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-    qwen_model: glm-4.7
+    qwen_model: deepseek-v4-pro
     qwen_embedding_model: text-embedding-v4
     embedding_dimensions: 1024
     rag_index: rag_chunks
@@ -22,9 +22,6 @@ ai:
         - name: deepseek-v4-flash
           expire_at: ""
           show_in_chat: true
-        - name: llama-4-maverick-17b-128e-instruct
-          expire_at: 2026/06/15
-          show_in_chat: false
         - name: llama-4-scout-17b-16e-instruct
           expire_at: 2026/06/15
           show_in_chat: false
@@ -59,12 +56,6 @@ ai:
           expire_at: 2026/06/16
           show_in_chat: false
         - name: qvq-plus
-          expire_at: 2026/06/16
-          show_in_chat: false
-        - name: qwen3-coder-flash-2025-07-28
-          expire_at: 2026/06/16
-          show_in_chat: false
-        - name: deepseek-v3
           expire_at: 2026/06/16
           show_in_chat: false
         - name: gui-plus-2026-02-26
