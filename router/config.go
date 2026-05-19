@@ -28,5 +28,7 @@ func (c *ConfigRouter) InitConfigRouter(Router *gin.RouterGroup) {
 		configRouter.PUT("jwt", configApi.UpdateJwt)
 		configRouter.GET("gaode", configApi.GetGaode)
 		configRouter.PUT("gaode", configApi.UpdateGaode)
+		configRouter.GET("ai", configApi.GetAI)
+		configRouter.PUT("ai", configApi.UpdateAI)
 	}
 }

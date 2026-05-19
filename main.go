@@ -23,7 +23,13 @@ func main() {
 	global.AsynqServer = initialize.RunAsynqServer()
 	defer global.AsynqServer.Shutdown()
 
-	initialize.InitCron()
+	cronRunner := initialize.InitCron()
+	defer func() {
+		if cronRunner != nil {
+			cronCtx := cronRunner.Stop()
+			<-cronCtx.Done()
+		}
+	}()
 
 	core.RunServer()
 }

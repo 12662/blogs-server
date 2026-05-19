@@ -172,3 +172,26 @@ func (configApi *ConfigApi) UpdateGaode(c *gin.Context) {
 	}
 	response.OkWithMessage("Successfully updated gaode", c)
 }
+
+// GetAI 获取 AI 配置
+func (configApi *ConfigApi) GetAI(c *gin.Context) {
+	response.OkWithData(global.Config.AI, c)
+}
+
+// UpdateAI 更新 AI 配置
+func (configApi *ConfigApi) UpdateAI(c *gin.Context) {
+	var req config.AI
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
+		response.FailWithMessage(err.Error(), c)
+		return
+	}
+
+	err = configService.UpdateAI(req)
+	if err != nil {
+		global.Log.Error("Failed to update ai:", zap.Error(err))
+		response.FailWithMessage("Failed to update ai", c)
+		return
+	}
+	response.OkWithMessage("Successfully updated ai", c)
+}

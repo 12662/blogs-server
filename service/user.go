@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"net"
 	"server/global"
 	"server/model/appTypes"
 	"server/model/database"
@@ -10,6 +11,7 @@ import (
 	"server/model/request"
 	"server/model/response"
 	"server/utils"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -139,28 +141,55 @@ func (userService *UserService) UserChangeInfo(req request.UserChangeInfo) error
 	return global.DB.Model(&user).Updates(req).Error
 }
 
-func (userService *UserService) UserWeather(ip string) (string, error) {
-	// 从redis中获取天气数据，如果没有数据，则调用高德api进行查询
-	result, err := global.Redis.Get("weather-" + ip).Result()
+func (userService *UserService) UserWeather(ip string, city string) (string, error) {
+	if !global.Config.Gaode.Enable || strings.TrimSpace(global.Config.Gaode.Key) == "" || strings.HasPrefix(global.Config.Gaode.Key, "xxxxx") {
+		return "天气服务未启用，请先在后台配置高德 Key。", nil
+	}
+
+	adcode := strings.TrimSpace(city)
+	cacheKey := "weather-" + ip
+	if adcode != "" {
+		cacheKey = "weather-city-" + adcode
+	}
+
+	// 从 redis 中获取天气数据，如果没有数据，则调用高德 api 进行查询。
+	result, err := global.Redis.Get(cacheKey).Result()
 	if err != nil {
-		ipResponse, err := ServiceGroupApp.GaodeService.GetLocationByIP(ip)
-		if err != nil {
-			return "", err
+		if adcode == "" {
+			if isLocalOrPrivateIP(ip) {
+				return "当前是本地或内网访问，无法通过 IP 自动定位天气；可以使用 /api/user/weather?city=城市adcode 查询。", nil
+			}
+
+			ipResponse, err := ServiceGroupApp.GaodeService.GetLocationByIP(ip)
+			if err != nil {
+				return "", err
+			}
+			adcode = strings.TrimSpace(ipResponse.Adcode)
+			if adcode == "" {
+				return "暂时无法根据当前 IP 定位城市天气。", nil
+			}
 		}
-		live, err := ServiceGroupApp.GaodeService.GetWeatherByAdcode(ipResponse.Adcode)
+
+		live, err := ServiceGroupApp.GaodeService.GetWeatherByAdcode(adcode)
 		if err != nil {
 			return "", err
 		}
 
 		weather := "地区：" + live.Province + "-" + live.City + " 天气：" + live.Weather + " 温度：" + live.Temperature + "°C" + " 风向：" + live.WindDirection + " 风级：" + live.WindPower + " 湿度：" + live.Humidity + "%"
 
-		// 将天气数据存入redis
-		if err := global.Redis.Set("weather-"+ip, weather, time.Hour*1).Err(); err != nil {
-			return "", err
-		}
+		// 将天气数据存入 redis，避免后台首页频繁请求第三方接口；缓存失败不影响本次天气查询。
+		_ = global.Redis.Set(cacheKey, weather, time.Hour*1).Err()
 		return weather, nil
 	}
 	return result, nil
+}
+
+func isLocalOrPrivateIP(ipText string) bool {
+	ip := net.ParseIP(ipText)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
 }
 
 func (userService *UserService) UserChart(req request.UserChart) (response.UserChart, error) {

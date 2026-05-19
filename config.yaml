@@ -1,8 +1,8 @@
 ai:
     enable: true
-    qwen_api_key: "sk-c0841cd2b5cf443491ec4d13ff5d1a7a"
+    qwen_api_key: sk-c0841cd2b5cf443491ec4d13ff5d1a7a
     qwen_base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-    qwen_model: qwen-turbo-latest
+    qwen_model: glm-4.7
     qwen_embedding_model: text-embedding-v4
     embedding_dimensions: 1024
     rag_index: rag_chunks
@@ -14,8 +14,392 @@ ai:
     embedding_batch_size: 10
     embedding_concurrency: 2
     rag_maintenance_enable: true
-    rag_maintenance_spec: "@every 30m"
+    rag_maintenance_spec: '@every 30m'
     rag_maintenance_batch_size: 50
+    intro_reply: "\U0001F44B你好，我是天奇。很高兴能有机会和你聊聊。\n\n做研发这些年，简历上不可避免地堆叠了不少框架和项目经历，但如果抛开那些冷冰冰的技术名词，我其实就是一个对‘把东西做出来、而且要做得好用’充满热情的开发者。\n\n我之前主要在前端领域摸爬滚打，经历过从零到一的基建，也死磕过比较复杂的 3D 可视化和多端应用的性能优化。说实话，每次遇到棘手的 Bug 或需求，第一反应也会觉得头疼，但当看着原本卡顿的页面一点点变得丝滑，或者自己顺手封装的小组件帮团队兄弟们省下了大把时间，那种成就感真的是让我一直乐此不疲敲代码的最大动力。\n\n因为性格里带点爱折腾的基因，我平时不太喜欢给自己设限。前端业务写熟练了，就会自然而然地好奇数据是怎么流转的，于是跑去折腾后端（最近对 Go 和 Gin 就特别上头），也会利用业余时间搭搭自己的个人博客、写点自动化的小脚本。这倒不是为了证明自己有多‘全能’，纯粹是觉得能跳出单一的视角，从头到尾亲手跑通一个完整的系统，是一件特别酷、也特别开阔思路的事。\n\n在团队里，我算是个比较活跃、爱交流的人。比起一个人闷头造轮子，我更喜欢和大家一起讨论方案。我觉得写代码是个团队运动，技术最终也是要服务于人和业务的。能和大家一起找到落地最稳、配合最舒服的方案，比单纯追求某一种‘高大上’的技术更有意义。\n\n我一直很期待能遇到一群志同道合的伙伴，去攻克些有挑战性的难题。很高兴认识您，期待能有机会一起做点有意思的事情！"
+    tech_stack_reply: "### \U0001F4BB 后端核心架构 (Go / Gin)\n\n基于轻量级与高并发考量，采用 Go 语言生态构建高性能 RESTful API 服务：\n\n* **核心框架**：采用 `Gin` 框架承载核心路由与 API 接口，结合 `Gin-Contrib` 实现基础的会话管理。\n* **数据与持久层**：以 `MySQL` 作为核心业务数据库，借助 `GORM` 实现高效、安全的对象关系映射与数据操作。\n* **安全鉴权体系**：基于 `JWT (v4)` 构建无状态鉴权机制，保障接口会话安全。\n* **缓存与状态管理**：引入 `Redis (go-redis)`，用于处理高频热点数据缓存及分布式状态存储。\n* **全文检索引擎**：集成 `Elasticsearch (v8)` 及官方 Go 客户端，为系统提供复杂查询与毫秒级的高级搜索能力。\n* **基础服务与中间件**：\n* **日志监控**：采用 Uber 开源的 `Zap` 构建高性能、结构化的系统日志追踪。\n* **存储与分发**：对接七牛云 `Qiniu SDK`，实现静态资源与图片的高效上传与管理。\n* **业务驱动组件**：使用 `Cron (v3)` 处理复杂定时任务调度；集成 `Email` 模块处理邮件分发（如验证码）；采用 `Base64Captcha` 生成图形验证码防止接口被刷。\n\n### \U0001F680 前端工程化体系 (Vue3 + TypeScript)\n\n全面拥抱现代前端标准，兼顾极致的开发体验 (DX) 与优秀的页面响应性能：\n\n* **核心框架**：使用 `Vue 3` (Setup 组合式 API) 结合 `TypeScript`，大幅提升代码的复用率与类型安全性。\n* **工程化构建**：底层采用 `Vite` 构建工具，配合 `@vitejs/plugin-vue` 实现极速冷启动与热重载。\n* **性能与体验优化**：引入 `unplugin-auto-import` 和 `unplugin-vue-components` 插件实现组件与 API 的自动按需导入，有效缩减打包体积；辅以 `vue-tsc` 确保编译期的严格类型检查。\n* **状态与路由管理**：舍弃庞大的 Vuex，采用更轻量、类型友好的 `Pinia` 管理全局状态；使用 `Vue Router` 实现前端路由调度。\n* **UI 渲染与数据可视化**：\n* 使用 `Element Plus` 构建统一、规范的业务操作界面。\n* 引入 `ECharts` 满足复杂数据大屏与统计图表的可视化需求。\n* 采用 `Sass` 预处理器编写结构化、高可维护的样式代码。\n* **网络通信**：基于 `Axios` 封装统一的 HTTP 请求拦截器，无缝对接后端的双 Token 鉴权与刷新机制。"
+    chat_models:
+        - name: deepseek-v4-flash
+          expire_at: ""
+          show_in_chat: true
+        - name: llama-4-maverick-17b-128e-instruct
+          expire_at: 2026/06/15
+          show_in_chat: false
+        - name: llama-4-scout-17b-16e-instruct
+          expire_at: 2026/06/15
+          show_in_chat: false
+        - name: deepseek-r1-distill-llama-70b
+          expire_at: 2026/06/15
+          show_in_chat: false
+        - name: qwen3-vl-plus
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-30b-a3b
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: glm-4.5
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-coder-turbo
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: glm-4.6
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-mt-plus
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-vl-8b-instruct
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: glm-4.7
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-vl-ocr-2025-08-28
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qvq-plus
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-coder-flash-2025-07-28
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: deepseek-v3
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: gui-plus-2026-02-26
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-vl-plus-2025-12-19
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-plus-2025-04-28
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-mt-turbo
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3.5-plus
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-long-2025-01-25
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-math-plus-latest
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-plus-2025-07-14
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwq-plus
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: deepseek-r1-0528
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-next-80b-a3b-instruct
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: deepseek-v3.2-exp
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-math-turbo
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-vl-235b-a22b-thinking
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-vl-32b-thinking
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-plus-2025-07-28
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: deepseek-r1-distill-qwen-7b
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-vl-plus-latest
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-max
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: glm-5
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-mt-flash
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-vl-30b-a3b-thinking
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-vl-ocr-latest
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-32b
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: deepseek-r1-distill-qwen-32b
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-vl-plus
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-long
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3.5-35b-a3b
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: glm-4.5-air
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-coder-480b-a35b-instruct
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-vl-8b-thinking
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-coder-plus
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3.5-flash-2026-02-23
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-vl-flash-2025-10-15
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-max-preview
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-vl-ocr-1028
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-8b
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-plus-0112
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-math-plus
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: gui-plus
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-plus
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-turbo
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qvq-max
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-coder-flash
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-next-80b-a3b-thinking
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3.5-27b
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: tongyi-xiaomi-analysis-flash
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: deepseek-r1
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-vl-flash
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-14b
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-math-plus-0919
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: MiniMax-M2.5
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-plus-2025-12-01
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-max-2025-09-23
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-plus-character
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-flash-character
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: MiniMax-M2.1
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: deepseek-r1-distill-qwen-14b
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-30b-a3b-instruct-2507
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-flash
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-flash-2025-07-28
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-235b-a22b-instruct-2507
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-coder-plus-2025-07-22
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: kimi-k2.5
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-vl-ocr
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-long-latest
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-vl-ocr-2025-04-13
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-plus-1220
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3.5-122b-a10b
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-vl-ocr-2025-11-20
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: tongyi-intent-detect-v3
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-max
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3.5-plus-2026-02-15
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-235b-a22b-thinking-2507
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: kimi-k2-thinking
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: deepseek-v3.1
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3.5-397b-a17b
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-vl-plus-2025-09-23
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: deepseek-v3.2
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-math-plus-0816
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-coder-next
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: tongyi-xiaomi-analysis-pro
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3.5-flash
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-vl-32b-instruct
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-30b-a3b-thinking-2507
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-coder-plus-2025-09-23
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-plus-latest
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-max-2026-01-23
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: Moonshot-Kimi-K2-Instruct
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-plus-2025-09-11
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-vl-flash-2026-01-22
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-vl-max
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-vl-30b-a3b-instruct
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-vl-235b-a22b-instruct
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-coder-30b-a3b-instruct
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-flash-character-2026-02-26
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3-235b-a22b
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-coder-plus
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-mt-lite
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen-plus-2025-01-25
+          expire_at: 2026/06/16
+          show_in_chat: false
+        - name: qwen3.6-plus
+          expire_at: 2026/07/02
+          show_in_chat: true
+        - name: qwen3.6-plus-2026-04-02
+          expire_at: 2026/07/02
+          show_in_chat: false
+        - name: glm-5.1
+          expire_at: 2026/07/14
+          show_in_chat: false
+        - name: qwen3.6-flash
+          expire_at: 2026/07/17
+          show_in_chat: true
+        - name: qwen3.6-flash-2026-04-16
+          expire_at: 2026/07/17
+          show_in_chat: false
+        - name: qwen3.6-35b-a3b
+          expire_at: 2026/07/17
+          show_in_chat: false
+        - name: qwen3.6-max-preview
+          expire_at: 2026/07/20
+          show_in_chat: false
+        - name: kimi-k2.6
+          expire_at: 2026/07/21
+          show_in_chat: false
+        - name: qwen3.5-plus-2026-04-20
+          expire_at: 2026/07/23
+          show_in_chat: false
+        - name: qwen3.6-27b
+          expire_at: 2026/07/23
+          show_in_chat: true
+        - name: deepseek-v4-pro
+          expire_at: 2026/07/24
+          show_in_chat: true
 captcha:
     height: 80
     width: 240
@@ -35,12 +419,12 @@ es:
     password: ""
     is_console_print: true
 gaode:
-    enable: false
-    key: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    enable: true
+    key: 00825738a685a00be619f8e565924351
 jwt:
     access_token_secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
     refresh_token_secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-    access_token_expiry_time: 2h
+    access_token_expiry_time: 1d
     refresh_token_expiry_time: 7d
     issuer: go_blog
 mysql:

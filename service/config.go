@@ -5,6 +5,7 @@ import (
 	"server/global"
 	"server/model/appTypes"
 	"server/utils"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -74,4 +75,31 @@ func (configService *ConfigService) UpdateJwt(jwt config.Jwt) error {
 func (configService *ConfigService) UpdateGaode(gaode config.Gaode) error {
 	global.Config.Gaode = gaode
 	return utils.SaveYAML()
+}
+
+func (configService *ConfigService) UpdateAI(ai config.AI) error {
+	ai.QwenEmbeddingModel = global.Config.AI.QwenEmbeddingModel
+	ai.EmbeddingDimensions = global.Config.AI.EmbeddingDimensions
+	ai.ChatModels = normalizeAIModels(ai.ChatModels)
+	global.Config.AI = ai
+	return utils.SaveYAML()
+}
+
+func normalizeAIModels(models []config.AIModel) []config.AIModel {
+	result := make([]config.AIModel, 0, len(models))
+	seen := make(map[string]struct{})
+	for _, model := range models {
+		model.Name = strings.TrimSpace(model.Name)
+		model.ExpireAt = strings.TrimSpace(model.ExpireAt)
+		if model.Name == "" {
+			continue
+		}
+		key := model.Name + "\x00" + model.ExpireAt
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, model)
+	}
+	return result
 }

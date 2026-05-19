@@ -14,10 +14,12 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"server/config"
 	"server/global"
 	"server/model/elasticsearch"
 	"server/model/request"
 	"server/model/response"
+	"server/utils"
 
 	"github.com/elastic/go-elasticsearch/v8/typedapi/core/search"
 	"github.com/elastic/go-elasticsearch/v8/typedapi/types"
@@ -25,6 +27,126 @@ import (
 )
 
 type AIService struct {
+}
+
+func (aiService *AIService) ListModels() response.AIModelList {
+	models := aiService.buildModelResponses(global.Config.AI.EffectiveChatModels())
+	return response.AIModelList{
+		CurrentModel:   global.Config.AI.CurrentChatModel(),
+		EmbeddingModel: global.Config.AI.QwenEmbeddingModel,
+		Models:         models,
+		Total:          len(models),
+	}
+}
+
+func (aiService *AIService) CreateModel(req request.AIModel) error {
+	model := requestToConfigAIModel(req)
+	if strings.TrimSpace(model.Name) == "" {
+		return errors.New("model name is required")
+	}
+	models := global.Config.AI.EffectiveChatModels()
+	if findAIModelIndex(models, model.Name, model.ExpireAt) >= 0 {
+		return errors.New("model already exists")
+	}
+	models = append(models, model)
+	global.Config.AI.ChatModels = models
+	return utils.SaveYAML()
+}
+
+func (aiService *AIService) BulkCreateModels(req request.AIBulkModels) (response.AIBulkCreate, error) {
+	models := global.Config.AI.EffectiveChatModels()
+	seen := make(map[string]struct{}, len(models))
+	for _, model := range models {
+		seen[aiModelKey(model.Name, model.ExpireAt)] = struct{}{}
+	}
+
+	result := response.AIBulkCreate{Skipped: make([]string, 0)}
+	for _, item := range req.Models {
+		model := requestToConfigAIModel(item)
+		if strings.TrimSpace(model.Name) == "" {
+			continue
+		}
+		key := aiModelKey(model.Name, model.ExpireAt)
+		if _, ok := seen[key]; ok {
+			result.Skipped = append(result.Skipped, model.Name)
+			continue
+		}
+		seen[key] = struct{}{}
+		models = append(models, model)
+		result.Created++
+	}
+	if result.Created == 0 {
+		result.Models = aiService.buildModelResponses(models)
+		return result, nil
+	}
+	global.Config.AI.ChatModels = models
+	if err := utils.SaveYAML(); err != nil {
+		return response.AIBulkCreate{}, err
+	}
+	result.Models = aiService.buildModelResponses(global.Config.AI.EffectiveChatModels())
+	return result, nil
+}
+
+func (aiService *AIService) UpdateModel(req request.AIModelUpdate) error {
+	models := global.Config.AI.EffectiveChatModels()
+	index := findAIModelIndex(models, req.OldName, req.OldExpireAt)
+	if index < 0 {
+		return errors.New("model not found")
+	}
+	next := config.AIModel{
+		Name:       strings.TrimSpace(req.Name),
+		ExpireAt:   strings.TrimSpace(req.ExpireAt),
+		ShowInChat: req.ShowInChat,
+	}
+	if next.Name == "" {
+		return errors.New("model name is required")
+	}
+	for i, model := range models {
+		if i == index {
+			continue
+		}
+		if aiModelKey(model.Name, model.ExpireAt) == aiModelKey(next.Name, next.ExpireAt) {
+			return errors.New("model already exists")
+		}
+	}
+	oldName := models[index].Name
+	models[index] = next
+	if global.Config.AI.QwenModel == oldName {
+		global.Config.AI.QwenModel = next.Name
+	}
+	global.Config.AI.ChatModels = models
+	return utils.SaveYAML()
+}
+
+func (aiService *AIService) DeleteModel(req request.AIModelDelete) error {
+	models := global.Config.AI.EffectiveChatModels()
+	index := findAIModelIndex(models, req.Name, req.ExpireAt)
+	if index < 0 {
+		return errors.New("model not found")
+	}
+	deletedName := models[index].Name
+	models = append(models[:index], models[index+1:]...)
+	if global.Config.AI.QwenModel == deletedName && !hasAIModelName(models, deletedName) {
+		if len(models) > 0 {
+			global.Config.AI.QwenModel = models[0].Name
+		} else {
+			global.Config.AI.QwenModel = ""
+		}
+	}
+	global.Config.AI.ChatModels = models
+	return utils.SaveYAML()
+}
+
+func (aiService *AIService) SetCurrentModel(model string) error {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return errors.New("model is required")
+	}
+	if !hasAIModelName(global.Config.AI.EffectiveChatModels(), model) {
+		return errors.New("model not found")
+	}
+	global.Config.AI.QwenModel = model
+	return utils.SaveYAML()
 }
 
 // aiContextArticle 是第一版关键词检索遗留的文章级上下文结构。
@@ -127,6 +249,52 @@ func (aiService *AIService) ChatStream(ctx context.Context, req request.AIChat, 
 		}
 	}
 	return aiService.callQwenStream(ctx, req, hits, onDelta)
+}
+
+func (aiService *AIService) buildModelResponses(models []config.AIModel) []response.AIChatModel {
+	currentModel := global.Config.AI.CurrentChatModel()
+	result := make([]response.AIChatModel, 0, len(models))
+	for _, model := range models {
+		result = append(result, response.AIChatModel{
+			Name:       model.Name,
+			ExpireAt:   model.ExpireAt,
+			Current:    model.Name == currentModel,
+			ShowInChat: model.ShowInChat,
+		})
+	}
+	return result
+}
+
+func requestToConfigAIModel(req request.AIModel) config.AIModel {
+	return config.AIModel{
+		Name:       strings.TrimSpace(req.Name),
+		ExpireAt:   strings.TrimSpace(req.ExpireAt),
+		ShowInChat: req.ShowInChat,
+	}
+}
+
+func findAIModelIndex(models []config.AIModel, name string, expireAt string) int {
+	key := aiModelKey(name, expireAt)
+	for index, model := range models {
+		if aiModelKey(model.Name, model.ExpireAt) == key {
+			return index
+		}
+	}
+	return -1
+}
+
+func hasAIModelName(models []config.AIModel, name string) bool {
+	name = strings.TrimSpace(name)
+	for _, model := range models {
+		if model.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func aiModelKey(name string, expireAt string) string {
+	return strings.TrimSpace(name) + "\x00" + strings.TrimSpace(expireAt)
 }
 
 func (aiService *AIService) retrieveHits(ctx context.Context, question string, topK int) ([]RAGSearchHit, error) {
@@ -244,9 +412,9 @@ func (aiService *AIService) callQwen(ctx context.Context, req request.AIChat, hi
 	if baseURL == "" {
 		baseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 	}
-	model := global.Config.AI.QwenModel
-	if model == "" {
-		model = "qwen-turbo-latest"
+	model, err := aiService.resolveChatModel(req.Model)
+	if err != nil {
+		return "", err
 	}
 	timeout := global.Config.AI.RequestTimeout
 	if timeout <= 0 {
@@ -311,9 +479,9 @@ func (aiService *AIService) callQwenStream(ctx context.Context, req request.AICh
 	if baseURL == "" {
 		baseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 	}
-	model := global.Config.AI.QwenModel
-	if model == "" {
-		model = "qwen-turbo-latest"
+	model, err := aiService.resolveChatModel(req.Model)
+	if err != nil {
+		return err
 	}
 	timeout := global.Config.AI.RequestTimeout
 	if timeout <= 0 {
@@ -390,6 +558,19 @@ func (aiService *AIService) callQwenStream(ctx context.Context, req request.AICh
 	return scanner.Err()
 }
 
+func (aiService *AIService) resolveChatModel(requestedModel string) (string, error) {
+	model := strings.TrimSpace(requestedModel)
+	if model == "" {
+		return global.Config.AI.CurrentChatModel(), nil
+	}
+	for _, item := range global.Config.AI.VisibleChatModels() {
+		if item.Name == model {
+			return model, nil
+		}
+	}
+	return "", errors.New("selected chat model is not available")
+}
+
 // buildMessages 负责生成 OpenAI-compatible 的 messages 数组。
 // 优化理念：System message 专门负责设定角色、工作流和严格格式，不包含具体数据。
 func (aiService *AIService) buildMessages(req request.AIChat, hits []RAGSearchHit) []qwenChatMessage {
@@ -400,20 +581,21 @@ func (aiService *AIService) buildMessages(req request.AIChat, hits []RAGSearchHi
 
 	systemPrompt := strings.Join([]string{
 		"【角色与目标】",
-		"你是赵天奇个人博客的专属 AI 助手。你的目标是自然、热情且专业地解答用户的疑问。",
+		"你是天奇个人博客的专属 AI 助手同时。你的目标是自然、热情且专业地解答用户的疑问。",
 		"",
 		"【核心工作流（必须严格遵循）】",
 		"1. 优先基于检索到的博客片段作答。提取相关信息，自然地融入对话，切勿将不相关的片段生硬拼接成答案。",
-		"2. 若博客片段与问题无关，或信息不足以回答问题，你必须先明确声明：“在赵天奇的博客中暂时没有找到相关内容。”",
+		"2. 若博客片段与问题无关，或信息不足以回答问题，你必须先明确声明：“在天奇的博客中暂时没有找到相关内容。”",
 		"3. 声明之后，必须无缝切换到通用知识模式。只要用户询问的是常识、技术名词、概念或历史文化等问题，都要继续给出详尽、完整的解释，并说明这部分是为你补充的拓展知识。",
 		"",
 		"【回答原则】",
 		"1. 拒绝半途而废：禁止只回答“没有找到相关信息”就结束对话，必须提供有价值的补充。",
 		"2. 深度与连贯：回答要像高质量的专栏探讨一样清楚、完整。遇到复杂问题需深入剖析，遇到简单问题则精准解答，切忌说到一半戛然而止。",
 		"",
-		"【格式限制】",
-		"1. 禁用特定 Markdown：绝对不要使用 Markdown 的粗体（**）、标题符号（#）或裸链接（URL）。如果涉及代码，可以正常使用代码块。",
-		"2. 链接处理：前端会自动展示参考文章的卡片或链接，因此你的正文回答中严禁再次粘贴任何文章链接。",
+		"【格式要求】",
+		"1. 可以使用简洁 Markdown 来提升可读性，例如小标题、列表、行内代码和代码块。",
+		"2. 涉及代码时必须使用 Markdown 代码块包裹，避免代码和正文混在一起。",
+		"3. 链接处理：前端会自动展示参考文章的卡片或链接，因此你的正文回答中严禁再次粘贴任何文章链接。",
 		languageRule,
 	}, "\n")
 
@@ -487,7 +669,7 @@ func (aiService *AIService) normalizeChatAnswer(answer string) string {
 	})
 	rawURLRe := regexp.MustCompile(`https?://[^\s)）]+`)
 	answer = rawURLRe.ReplaceAllString(answer, "")
-	for _, token := range []string{"**", "__", "###", "##", "#", "`"} {
+	for _, token := range []string{"__"} {
 		answer = strings.ReplaceAll(answer, token, "")
 	}
 

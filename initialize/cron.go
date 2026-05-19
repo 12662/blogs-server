@@ -27,7 +27,7 @@ func NewZapLogger() *ZapLogger {
 }
 
 // InitCron 初始化定时任务
-func InitCron() {
+func InitCron() *cron.Cron {
 	// 将 cron 包的日志记录转发到 zap 日志库中，实现统一的日志管理和记录
 	c := cron.New(cron.WithLogger(NewZapLogger()))
 	err := task.RegisterScheduledTasks(c)
@@ -36,4 +36,5 @@ func InitCron() {
 		os.Exit(1)
 	}
 	c.Start()
+	return c
 }

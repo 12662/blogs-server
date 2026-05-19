@@ -5,6 +5,32 @@ type AIChat struct {
 	Sources []AIArticle `json:"sources"`
 }
 
+type AIChatModels struct {
+	CurrentModel   string        `json:"current_model"`
+	EmbeddingModel string        `json:"embedding_model"`
+	Models         []AIChatModel `json:"models"`
+}
+
+type AIModelList struct {
+	CurrentModel   string        `json:"current_model"`
+	EmbeddingModel string        `json:"embedding_model"`
+	Models         []AIChatModel `json:"models"`
+	Total          int           `json:"total"`
+}
+
+type AIBulkCreate struct {
+	Created int      `json:"created"`
+	Skipped []string `json:"skipped"`
+	Models  []AIChatModel `json:"models"`
+}
+
+type AIChatModel struct {
+	Name       string `json:"name"`
+	ExpireAt   string `json:"expire_at"`
+	Current    bool   `json:"current"`
+	ShowInChat bool   `json:"show_in_chat"`
+}
+
 type AIArticle struct {
 	ID       string   `json:"id"`
 	Title    string   `json:"title"`
