@@ -14,6 +14,7 @@ type ApiGroup struct {
 	FeedbackApi
 	WebsiteApi
 	ConfigApi
+	WechatApi
 }
 
 var ApiGroupApp = new(ApiGroup)
@@ -31,3 +32,4 @@ var friendLinkService = service.ServiceGroupApp.FriendLinkService
 var feedbackService = service.ServiceGroupApp.FeedbackService
 var websiteService = service.ServiceGroupApp.WebsiteService
 var configService = service.ServiceGroupApp.ConfigService
+var wechatService = service.ServiceGroupApp.WechatService

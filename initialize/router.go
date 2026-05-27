@@ -2,6 +2,7 @@ package initialize
 
 import (
 	"net/http"
+	"server/api"
 	"server/global"
 	"server/middleware"
 	"server/router"
@@ -24,6 +25,9 @@ func InitRouter() *gin.Engine {
 	// 将指定目录下的文件提供给客户端
 	// "uploads" 是URL路径前缀，http.Dir("uploads")是实际文件系统中存储文件的目录
 	Router.StaticFS(global.Config.Upload.Path, http.Dir(global.Config.Upload.Path))
+	shareApi := api.ApiGroupApp.ArticleApi
+	Router.GET("/", shareApi.HomeSharePage)
+	Router.GET("/article/:id", shareApi.ArticleSharePage)
 	// 创建路由组
 	routerGroup := router.RouterGroupApp
 
@@ -47,6 +51,7 @@ func InitRouter() *gin.Engine {
 		routerGroup.InitAdvertisementRouter(adminGroup, publicGroup)
 		routerGroup.InitFriendLinkRouter(adminGroup, publicGroup)
 		routerGroup.InitWebsiteRouter(adminGroup, publicGroup)
+		routerGroup.InitWechatRouter(publicGroup)
 		routerGroup.InitConfigRouter(adminGroup)
 	}
 	return Router

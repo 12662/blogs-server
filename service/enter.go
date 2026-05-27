@@ -16,6 +16,7 @@ type ServiceGroup struct {
 	FriendLinkService
 	FeedbackService
 	WebsiteService
+	WechatService
 	HotSearchService
 	CalendarService
 	ConfigService

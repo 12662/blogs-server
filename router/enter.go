@@ -12,6 +12,7 @@ type RouterGroup struct {
 	FeedbackRouter
 	WebsiteRouter
 	ConfigRouter
+	WechatRouter
 }
 
 var RouterGroupApp = new(RouterGroup)

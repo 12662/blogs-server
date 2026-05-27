@@ -13,6 +13,7 @@ type Config struct {
 	Redis   Redis   `json:"redis" yaml:"redis"`
 	System  System  `json:"system" yaml:"system"`
 	Upload  Upload  `json:"upload" yaml:"upload"`
+	Wechat  Wechat  `json:"wechat" yaml:"wechat"`
 	Website Website `json:"website" yaml:"website"`
 	Zap     Zap     `json:"zap" yaml:"zap"`
 }

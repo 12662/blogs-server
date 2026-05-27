@@ -2,7 +2,7 @@ ai:
     enable: true
     qwen_api_key: sk-c0841cd2b5cf443491ec4d13ff5d1a7a
     qwen_base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-    qwen_model: deepseek-v4-pro
+    qwen_model: deepseek-v4-flash
     qwen_embedding_model: text-embedding-v4
     embedding_dimensions: 1024
     rag_index: rag_chunks
@@ -51,7 +51,7 @@ ai:
           show_in_chat: false
         - name: glm-4.7
           expire_at: 2026/06/16
-          show_in_chat: false
+          show_in_chat: true
         - name: qwen-vl-ocr-2025-08-28
           expire_at: 2026/06/16
           show_in_chat: false
@@ -72,7 +72,7 @@ ai:
           show_in_chat: false
         - name: qwen3.5-plus
           expire_at: 2026/06/16
-          show_in_chat: false
+          show_in_chat: true
         - name: qwen-long-2025-01-25
           expire_at: 2026/06/16
           show_in_chat: false
@@ -213,7 +213,7 @@ ai:
           show_in_chat: false
         - name: MiniMax-M2.5
           expire_at: 2026/06/16
-          show_in_chat: false
+          show_in_chat: true
         - name: qwen-plus-2025-12-01
           expire_at: 2026/06/16
           show_in_chat: false
@@ -381,7 +381,7 @@ ai:
           show_in_chat: false
         - name: kimi-k2.6
           expire_at: 2026/07/21
-          show_in_chat: false
+          show_in_chat: true
         - name: qwen3.5-plus-2026-04-20
           expire_at: 2026/07/23
           show_in_chat: false
@@ -456,6 +456,9 @@ system:
 upload:
     size: 20
     path: uploads
+wechat:
+    app_id: wxafce302ddbf74121
+    app_secret: 297856f2a79d1225a78ca699724c427b
 website:
     logo: /image/webLogo.jpg
     full_logo: ""
