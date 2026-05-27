@@ -608,7 +608,6 @@ func (aiService *AIService) buildMessages(req request.AIChat, hits []RAGSearchHi
 	// if strings.EqualFold(req.Language, "en") || looksEnglish(req.Message) {
 	// 	languageRule = "Answer in English because the user is asking in English. The retrieved blog snippets may be Chinese; translate and explain them naturally in English."
 	// }
-
 	systemPrompt := strings.Join([]string{
 		"【角色与目标】",
 		"你是天奇个人博客的专属 AI 助手同时。你的目标是自然、专业地解答用户的疑问。",
@@ -813,9 +812,9 @@ func (aiService *AIService) articleSnippet(article elasticsearch.Article, query 
 // notFoundAnswer 在 RAG 没召回任何 chunk 时返回兜底回答。
 // 注意这里不调用大模型，避免在没有博客依据时产生编造内容。
 func (aiService *AIService) notFoundAnswer(language string, question string) string {
-	if strings.EqualFold(language, "en") || looksEnglish(question) {
-		return "I could not find relevant information about this topic in the blog articles. Based on general knowledge, I can still give you a brief explanation: please try asking again with a more specific subject, and I will explain the topic while clearly separating general knowledge from blog-based references."
-	}
+	// if strings.EqualFold(language, "en") || looksEnglish(question) {
+	// 	return "I could not find relevant information about this topic in the blog articles. Based on general knowledge, I can still give you a brief explanation: please try asking again with a more specific subject, and I will explain the topic while clearly separating general knowledge from blog-based references."
+	// }
 	return "我没有在博客文章中找到足够相关的内容。就通用知识来说，你问到的这个问题仍然可以继续解释：我会先说明博客里没有对应资料，再根据公开常识补充背景、定义、关键特点和常见理解。你可以把问题问得更具体一些，例如询问某个人物是谁、某个技术概念怎么理解、某段历史有什么背景，我会把“博客依据”和“通用知识”分开说明，避免把博客里不存在的信息误说成博客内容。"
 }
 
