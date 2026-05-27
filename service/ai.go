@@ -604,14 +604,14 @@ func (aiService *AIService) resolveChatModel(requestedModel string) (string, err
 // buildMessages 负责生成 OpenAI-compatible 的 messages 数组。
 // 优化理念：System message 专门负责设定角色、工作流和严格格式，不包含具体数据。
 func (aiService *AIService) buildMessages(req request.AIChat, hits []RAGSearchHit) []qwenChatMessage {
-	languageRule := "请使用与用户最后一个问题相同的语言回答；如果用户使用英文提问，请使用英文回答。"
+	languageRule := "请使用与用户最后一个问题相同的语言回答；如果用户使用英文提问，请使用中文回答。"
 	if strings.EqualFold(req.Language, "en") || looksEnglish(req.Message) {
 		languageRule = "Answer in English because the user is asking in English. The retrieved blog snippets may be Chinese; translate and explain them naturally in English."
 	}
 
 	systemPrompt := strings.Join([]string{
 		"【角色与目标】",
-		"你是天奇个人博客的专属 AI 助手同时。你的目标是自然、热情且专业地解答用户的疑问。",
+		"你是天奇个人博客的专属 AI 助手同时。你的目标是自然、专业地解答用户的疑问。",
 		"",
 		"【核心工作流（必须严格遵循）】",
 		"1. 优先基于检索到的博客片段作答。提取相关信息，自然地融入对话，切勿将不相关的片段生硬拼接成答案。",
