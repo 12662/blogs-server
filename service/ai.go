@@ -605,9 +605,9 @@ func (aiService *AIService) resolveChatModel(requestedModel string) (string, err
 // 优化理念：System message 专门负责设定角色、工作流和严格格式，不包含具体数据。
 func (aiService *AIService) buildMessages(req request.AIChat, hits []RAGSearchHit) []qwenChatMessage {
 	languageRule := "请全程与用户使用中文交流。"
-	if strings.EqualFold(req.Language, "en") || looksEnglish(req.Message) {
-		languageRule = "Answer in English because the user is asking in English. The retrieved blog snippets may be Chinese; translate and explain them naturally in English."
-	}
+	// if strings.EqualFold(req.Language, "en") || looksEnglish(req.Message) {
+	// 	languageRule = "Answer in English because the user is asking in English. The retrieved blog snippets may be Chinese; translate and explain them naturally in English."
+	// }
 
 	systemPrompt := strings.Join([]string{
 		"【角色与目标】",
